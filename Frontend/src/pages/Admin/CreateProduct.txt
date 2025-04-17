@@ -1,0 +1,330 @@
+
+
+ // const [alternateMedicines, setAlternateMedicines] = useState([
+  //   {
+  //     name: "",
+  //     manufacturer: "",
+  //     manufacturerUrl: "",
+  //     price: 0,
+  //     mrp: 0,
+  //     salt: "",
+  //   },
+  // ]);
+ 
+ 
+ const handleChangeAlternateMedicine = (index, field, value) => {
+    const updatedAlternates = [...alternateMedicines];
+    updatedAlternates[index][field] = value;
+    setAlternateMedicines(updatedAlternates);
+  };
+  const validatePositiveNumber = (value) => {
+    const num = parseFloat(value);
+    return num > 0 && !isNaN(num);
+  };
+
+  const resetForm = () => {
+    // Reset the fields for the main product form
+    setAlternateMedicines([
+      { name: "", manufacturer: "", manufacturerUrl: "", price: 0 },
+    ]);
+
+    // Reset the general medicine fields
+    document.getElementById("productForm").reset();
+  };
+
+
+
+
+ const createMedicine = async (newProduct) => {
+    const { price, mrp, margin, category, salt } = newProduct;
+
+    // Validation: Ensure price, mrp, and margin are positive numbers
+    if (
+      !validatePositiveNumber(price) ||
+      !validatePositiveNumber(mrp) ||
+      (margin && !validatePositiveNumber(margin))
+    ) {
+      toast.error("Price, MRP, and Margin must be positive numbers.");
+      return;
+    }
+
+    try {
+      const formattedProduct = {
+        drugName: newProduct.drugName.trim(),
+        size: newProduct.size.trim(),
+        imageUrl: newProduct.imageUrl.trim(),
+        manufacturer: newProduct.manufacturer.trim(),
+        category: category.trim(),
+        price: parseFloat(newProduct.price),
+        mrp: parseFloat(newProduct.mrp),
+        salt: salt.trim(), // Main medicine salt
+        margin: newProduct.margin
+          ? parseFloat(newProduct.margin)
+          : parseFloat(newProduct.mrp) - parseFloat(newProduct.price),
+        alternateMedicines: alternateMedicines.map((alt) => ({
+          name: alt.name.trim(),
+          manufacturer: alt.manufacturer.trim(),
+          manufacturerUrl: alt.manufacturerUrl.trim(),
+          price: parseFloat(alt.price),
+          mrp: alt.mrp ? parseFloat(alt.mrp) : parseFloat(alt.price) * 1.05, // Default MRP if not provided
+          salt: alt.salt?.trim() || salt.trim(), // Use provided salt or default to main medicine's salt
+        })),
+      };
+
+      const response = await axios.post(
+        `${import.meta.env.VITE_BACKEND_URL}/api/products/createProduct`,
+        formattedProduct,
+        {
+          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+        }
+      );
+
+      setProducts((prevProducts) => [...prevProducts, response.data]);
+      toast.success("Medicine created successfully!", {
+        position: "top-center",
+      });
+
+      resetForm();
+    } catch (error) {
+      console.error(
+        "Error creating medicine:",
+        error.response ? error.response.data : error.message
+      );
+      toast.error(
+        error.response?.data?.message ||
+          "Failed to create medicine. Please try again."
+      );
+    }
+  };
+
+
+<button
+            onClick={() => setActiveSection("createProduct")}
+            className={`w-full mb-4 py-2 rounded-md font-medium text-white ${
+              activeSection === "createProduct"
+                ? "bg-gray-700"
+                : "hover:bg-gray-700"
+            }`}
+          >
+            Create Product
+          </button>
+
+
+
+
+{activeSection === "createProduct" && (
+          <div className="max-w-4xl mx-auto bg-white shadow-lg rounded-lg p-8">
+            <h1 className="text-3xl font-bold mb-6 text-center">
+              Create Medicine
+            </h1>
+            <form
+              id="medicineForm"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const newMedicine = Object.fromEntries(formData.entries());
+                createMedicine(newMedicine);
+              }}
+              className="grid grid-cols-1 lg:grid-cols-2 gap-6"
+            >
+              <div className="space-y-4">
+                <h3 className="text-xl font-semibold">General Medicine</h3>
+                <label className="block font-medium">Drug Name</label>
+                <input
+                  type="text"
+                  name="drugName"
+                  required
+                  className="w-full p-3 border rounded-lg"
+                />
+
+                <label className="block font-medium">ImageUrl</label>
+                <input
+                  type="text"
+                  name="imageUrl"
+                  required
+                  className="w-full p-3 border rounded-lg"
+                />
+
+                <label className="block font-medium">Size</label>
+                <input
+                  type="text"
+                  name="size"
+                  required
+                  className="w-full p-3 border rounded-lg"
+                />
+
+                <label className="block font-medium">Manufacturer</label>
+                <input
+                  type="text"
+                  name="manufacturer"
+                  required
+                  className="w-full p-3 border rounded-lg"
+                />
+
+                <label className="block font-medium">Category</label>
+                <input
+                  type="text"
+                  name="category"
+                  required
+                  className="w-full p-3 border rounded-lg"
+                />
+
+                <label className="block font-medium">Price</label>
+                <input
+                  type="number"
+                  name="price"
+                  required
+                  min="0.01"
+                  step="0.01"
+                  className="w-full p-3 border rounded-lg"
+                />
+
+                <label className="block font-medium">MRP</label>
+                <input
+                  type="number"
+                  name="mrp"
+                  required
+                  min="0.01"
+                  step="0.01"
+                  className="w-full p-3 border rounded-lg"
+                />
+
+                <label className="block font-medium">Salt</label>
+                <input
+                  type="text"
+                  name="salt"
+                  required
+                  className="w-full p-3 border rounded-lg"
+                />
+
+                <label className="block font-medium">Margin</label>
+                <input
+                  type="number"
+                  name="margin"
+                  min="0.01"
+                  step="0.01"
+                  className="w-full p-3 border rounded-lg"
+                />
+              </div>
+
+              <div className="space-y-4">
+                <h3 className="text-xl font-semibold">Alternate Medicines</h3>
+                {alternateMedicines.map((alt, index) => (
+                  <div key={index} className="space-y-2 p-4 border rounded-lg">
+                    <label className="block font-medium">Name</label>
+                    <input
+                      type="text"
+                      value={alt.name}
+                      onChange={(e) =>
+                        handleChangeAlternateMedicine(
+                          index,
+                          "name",
+                          e.target.value
+                        )
+                      }
+                      className="w-full p-2 border rounded-lg"
+                    />
+
+                    <label className="block font-medium">Manufacturer</label>
+                    <input
+                      type="text"
+                      value={alt.manufacturer}
+                      onChange={(e) =>
+                        handleChangeAlternateMedicine(
+                          index,
+                          "manufacturer",
+                          e.target.value
+                        )
+                      }
+                      className="w-full p-2 border rounded-lg"
+                    />
+
+                    <label className="block font-medium">
+                      Manufacturer URL
+                    </label>
+                    <input
+                      type="text"
+                      value={alt.manufacturerUrl}
+                      onChange={(e) =>
+                        handleChangeAlternateMedicine(
+                          index,
+                          "manufacturerUrl",
+                          e.target.value
+                        )
+                      }
+                      className="w-full p-2 border rounded-lg"
+                    />
+
+                    <label className="block font-medium">Price</label>
+                    <input
+                      type="number"
+                      value={alt.price || ""}
+                      min="0.01"
+                      step="0.01"
+                      onChange={(e) =>
+                        handleChangeAlternateMedicine(
+                          index,
+                          "price",
+                          e.target.value
+                        )
+                      }
+                      className="w-full p-2 border rounded-lg"
+                    />
+
+                    <label className="block font-medium">MRP</label>
+                    <input
+                      type="number"
+                      value={alt.mrp || ""}
+                      min="0.01"
+                      step="0.01"
+                      onChange={(e) =>
+                        handleChangeAlternateMedicine(
+                          index,
+                          "mrp",
+                          e.target.value
+                        )
+                      }
+                      className="w-full p-2 border rounded-lg"
+                    />
+
+                    <label className="block font-medium">Salt</label>
+                    <input
+                      type="text"
+                      value={alt.salt || ""}
+                      onChange={(e) =>
+                        handleChangeAlternateMedicine(
+                          index,
+                          "salt",
+                          e.target.value
+                        )
+                      }
+                      className="w-full p-2 border rounded-lg"
+                    />
+
+                    {/* <button
+                      type="button"
+                      onClick={() => removeAlternateMedicine(index)}
+                      className="text-red-500 text-lg font-semibold hover:text-red-700"
+                    >
+                      ×
+                    </button> */}
+                  </div>
+                ))}
+                {/* <button
+                  type="button"
+                  onClick={addAlternateMedicine}
+                  className="w-full p-2 bg-blue-600 text-white rounded-lg"
+                >
+                  Add Alternate Medicine
+                </button> */}
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3 mt-6 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Create Medicine
+              </button>
+            </form>
+          </div>
+        )}

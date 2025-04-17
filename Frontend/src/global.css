@@ -1,0 +1,24 @@
+/* global.css */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden; /* Prevent horizontal scrolling */
+    background-color: #fffcfd;
+}
+
+* {
+    box-sizing: border-box; /* Consistent box-sizing */
+}
+
+.swiper-pagination {
+    @apply mt-6; /* Adjust this margin to move pagination dots down */
+  }
+  
+  .custom-pagination-dot {
+    @apply bg-gray-500 w-2.5 h-2.5 rounded-full mx-1; /* Tailwind styles for dot appearance */
+  }
