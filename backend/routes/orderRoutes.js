@@ -335,7 +335,7 @@ router.get("/order-history", authorizeRoles("user"), async (req, res) => {
 
     const orders = await Order.find({ userId }).sort({ createdAt: -1 });
 
-    // ✅ Return stored product details from order instead of populating productId
+    // Return stored product details from order instead of populating productId
     const formattedOrders = orders.map((order) => ({
       _id: order._id,
       totalAmount: order.totalAmount,
@@ -346,7 +346,7 @@ router.get("/order-history", authorizeRoles("user"), async (req, res) => {
         productId: item.productId, // Keeping reference
         quantity: item.quantity,
         price: item.price,
-        productDetails: item.productDetails, // ✅ Use saved product details
+        productDetails: item.productDetails, // Use saved product details
       })),
     }));
 
@@ -433,22 +433,29 @@ router.put('/admin/orders/:orderId/items/:itemId', authorizeRoles("admin"), asyn
     }
 
     // Update the item
-    item.quantity = quantity;
-    item.price = price;
-    item.gstPercentage = gstPercentage || 0;
+    if (quantity) item.quantity = quantity;
+    if (price) item.price = price;
+    if (gstPercentage !== undefined) item.gstPercentage = gstPercentage;
 
-    // Recalculate order totals
-    order.totalAmount = order.items.reduce((sum, item) => {
-      const subtotal = item.price * item.quantity;
-      const gstAmount = subtotal * (item.gstPercentage || 0) / 100;
-      return sum + subtotal + gstAmount;
+    // Recalculate totals
+    const subtotal = order.items.reduce((sum, item) => {
+      const itemSubtotal = item.price * item.quantity;
+      const itemGST = itemSubtotal * (item.gstPercentage || 0) / 100;
+      return sum + itemSubtotal + itemGST;
     }, 0);
+
+    // Calculate discount
+    const discountAmount = (subtotal * (order.discountPercentage || 0)) / 100;
+    order.discountAmount = discountAmount;
+
+    // Calculate final total
+    order.finalTotal = subtotal - discountAmount + (order.deliveryCharge || 0);
 
     await order.save();
     res.json(order);
   } catch (error) {
-    console.error('Error updating order item:', error);
-    res.status(500).json({ message: 'Error updating order item' });
+    console.error("Error updating order item:", error);
+    res.status(500).json({ message: "Error updating order item" });
   }
 });
 
@@ -680,7 +687,12 @@ router.post("/create-from-prescription/:prescriptionId", authorizeRoles("admin")
 router.post("/admin/orders/:orderId/items", authorizeRoles("admin"), async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { productId, quantity, price, productDetails } = req.body;
+    const { productId, quantity, price, gstPercentage, isAlternate, alternateIndex } = req.body;
+
+    // Validate input
+    if (!productId || !quantity || quantity <= 0) {
+      return res.status(400).json({ message: "Invalid product data" });
+    }
 
     const order = await Order.findById(orderId);
     if (!order) {
@@ -693,40 +705,81 @@ router.post("/admin/orders/:orderId/items", authorizeRoles("admin"), async (req,
       return res.status(404).json({ message: "Product not found" });
     }
 
-    // Create order item with all required product details and default values
-    const orderItem = {
-      productId: product._id,
-      quantity,
-      price: price || product.price || 0,
-      productDetails: {
-        name: productDetails?.name || product.drugName || "Unknown Drug",
-        drugName: productDetails?.name || product.drugName || "Unknown Drug",
-        price: price || product.price || 0,
-        margin: productDetails?.margin || product.margin || 0,
-        imageUrl: productDetails?.imageUrl || product.imageUrl || "https://meds4you.in/uploads/default-medicine.png",
-        mrp: productDetails?.mrp || product.mrp || 0,
-        salt: productDetails?.salt || product.salt || "Not specified",
-        category: productDetails?.category || product.category || "General",
-        manufacturer: productDetails?.manufacturer || product.manufacturer || "Unknown Manufacturer",
-        size: productDetails?.size || product.size || "Standard"
-      }
+    // Get the correct price based on whether it's an alternate medicine
+    let finalPrice = price;
+    let productDetails = {
+      name: product.drugName,
+      drugName: product.drugName,
+      price: finalPrice,
+      margin: product.margin || 0,
+      imageUrl: product.imageUrl || "",
+      mrp: product.mrp || 0,
+      salt: product.salt || "",
+      category: product.category || "",
+      manufacturer: product.manufacturer || "",
+      size: product.size || ""
     };
 
-    // Add item to order
-    order.items.push(orderItem);
+    if (isAlternate && alternateIndex !== undefined && product.alternateMedicines?.[alternateIndex]) {
+      const altMedicine = product.alternateMedicines[alternateIndex];
+      finalPrice = altMedicine.price || price;
+      productDetails = {
+        ...productDetails,
+        name: altMedicine.name || product.drugName,
+        drugName: altMedicine.name || product.drugName,
+        price: finalPrice,
+        mrp: altMedicine.mrp || product.mrp || 0,
+        manufacturer: altMedicine.manufacturer || product.manufacturer,
+        size: altMedicine.size_1 || product.size
+      };
+    }
+
+    // Add the new item
+    const newItem = {
+      productId: productId, // Use the base product ID
+      quantity,
+      price: finalPrice,
+      gstPercentage: gstPercentage || 0,
+      isAlternate,
+      alternateIndex: isAlternate ? alternateIndex : undefined,
+      productDetails // Add product details
+    };
+
+    order.items.push(newItem);
 
     // Recalculate total amount
-    order.totalAmount = order.items.reduce((total, item) => {
+    const subtotal = order.items.reduce((total, item) => {
       return total + (item.price * item.quantity);
     }, 0);
+    order.totalAmount = subtotal;
 
-    // Save the updated order
+    // Calculate total GST
+    const totalGST = order.items.reduce((sum, item) => {
+      const itemSubtotal = item.price * item.quantity;
+      return sum + (itemSubtotal * (item.gstPercentage || 0) / 100);
+    }, 0);
+
+    // Update final totals
+    const totalWithGST = subtotal + totalGST;
+    const discountAmount = (totalWithGST * (order.discountPercentage || 0)) / 100;
+    
+    order.finalTotal = totalWithGST - discountAmount + (order.deliveryCharge || 0);
+
     await order.save();
 
-    res.status(200).json(order);
+    // Populate the order details before sending response
+    const populatedOrder = await Order.findById(orderId)
+      .populate("userId", "name phoneNumber addresses")
+      .populate(
+        "items.productId",
+        "drugName price imageUrl manufacturer alternateMedicines"
+      )
+      .lean();
+
+    res.json(populatedOrder);
   } catch (error) {
     console.error("Error adding item to order:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ message: "Error adding item to order" });
   }
 });
 
@@ -1112,6 +1165,158 @@ router.put("/admin/orders/:orderId/delivery-charge", authorizeRoles("admin"), as
     res.json(order);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+});
+
+// Add delivery charge update route
+router.put("/admin/orders/:orderId/delivery-charge", authorizeRoles("admin"), async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { deliveryCharge } = req.body;
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Update delivery charge
+    order.deliveryCharge = deliveryCharge;
+    
+    // Recalculate final total
+    const subtotal = order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const discountAmount = (subtotal * (order.discountPercentage || 0)) / 100;
+    order.discountAmount = discountAmount;
+    order.finalTotal = subtotal - discountAmount + deliveryCharge;
+
+    await order.save();
+    res.json(order);
+  } catch (error) {
+    console.error("Error updating delivery charge:", error);
+    res.status(500).json({ message: "Error updating delivery charge" });
+  }
+});
+
+// Add route for updating GST percentage
+router.put("/admin/orders/:orderId/items/:itemId", authorizeRoles("admin"), async (req, res) => {
+  try {
+    const { orderId, itemId } = req.params;
+    const { quantity, price, gstPercentage } = req.body;
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Find and update the item
+    const item = order.items.find(item => item._id.toString() === itemId);
+    if (!item) {
+      return res.status(404).json({ message: "Item not found in order" });
+    }
+
+    // Update item fields
+    if (quantity !== undefined) item.quantity = quantity;
+    if (price !== undefined) item.price = price;
+    if (gstPercentage !== undefined) item.gstPercentage = gstPercentage;
+
+    // Recalculate total amount
+    const subtotal = order.items.reduce((total, item) => {
+      return total + (item.price * item.quantity);
+    }, 0);
+    order.totalAmount = subtotal;
+
+    // Calculate total GST
+    const totalGST = order.items.reduce((sum, item) => {
+      const itemSubtotal = item.price * item.quantity;
+      return sum + (itemSubtotal * (item.gstPercentage || 0) / 100);
+    }, 0);
+
+    // Update final totals
+    const totalWithGST = subtotal + totalGST;
+    const discountAmount = (totalWithGST * (order.discountPercentage || 0)) / 100;
+    
+    order.finalTotal = totalWithGST - discountAmount + (order.deliveryCharge || 0);
+
+    await order.save();
+    res.json({ message: "Order item updated successfully", order });
+  } catch (error) {
+    console.error("Error updating order item:", error);
+    res.status(500).json({ message: "Error updating order item" });
+  }
+});
+
+// Add route for adding items to an order
+router.post("/admin/orders/:orderId/items", authorizeRoles("admin"), async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { productId, quantity, price, gstPercentage, isAlternate, alternateIndex } = req.body;
+
+    // Validate input
+    if (!productId || !quantity || quantity <= 0) {
+      return res.status(400).json({ message: "Invalid product data" });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Find the product
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    // Get the correct price based on whether it's an alternate medicine
+    let finalPrice = price;
+    if (isAlternate && alternateIndex !== undefined && product.alternateMedicines?.[alternateIndex]) {
+      finalPrice = product.alternateMedicines[alternateIndex].price || price;
+    }
+
+    // Add the new item
+    const newItem = {
+      productId: productId, // Use the base product ID
+      quantity,
+      price: finalPrice,
+      gstPercentage: gstPercentage || 0,
+      isAlternate,
+      alternateIndex: isAlternate ? alternateIndex : undefined
+    };
+
+    order.items.push(newItem);
+
+    // Recalculate total amount
+    const subtotal = order.items.reduce((total, item) => {
+      return total + (item.price * item.quantity);
+    }, 0);
+    order.totalAmount = subtotal;
+
+    // Calculate total GST
+    const totalGST = order.items.reduce((sum, item) => {
+      const itemSubtotal = item.price * item.quantity;
+      return sum + (itemSubtotal * (item.gstPercentage || 0) / 100);
+    }, 0);
+
+    // Update final totals
+    const totalWithGST = subtotal + totalGST;
+    const discountAmount = (totalWithGST * (order.discountPercentage || 0)) / 100;
+    
+    order.finalTotal = totalWithGST - discountAmount + (order.deliveryCharge || 0);
+
+    await order.save();
+
+    // Populate the order details before sending response
+    const populatedOrder = await Order.findById(orderId)
+      .populate("userId", "name phoneNumber addresses")
+      .populate(
+        "items.productId",
+        "drugName price imageUrl manufacturer alternateMedicines"
+      )
+      .lean();
+
+    res.json(populatedOrder);
+  } catch (error) {
+    console.error("Error adding item to order:", error);
+    res.status(500).json({ message: "Error adding item to order" });
   }
 });
 

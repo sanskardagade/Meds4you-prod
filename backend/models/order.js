@@ -12,6 +12,7 @@ const orderSchema = new Schema(
         },
         quantity: { type: Number, required: true },
         price: { type: Number, required: true },
+        gstPercentage: { type: Number, default: 0 },
         productDetails: {
           drugName: { type: String, required: true },
           imageUrl: { type: String, required: true },

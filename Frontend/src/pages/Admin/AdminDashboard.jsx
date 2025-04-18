@@ -55,6 +55,7 @@ const AdminDashboard = () => {
   const [newItem, setNewItem] = useState({
     productId: "",
     quantity: 1,
+    gstPercentage: 0
   });
 
   // Add new state for Add Medicine Modal
@@ -103,18 +104,18 @@ const AdminDashboard = () => {
 
         // Clean up the data before setting to state
         const cleanedProducts = productResponse.data.map(product => {
-          // Remove MongoDB specific fields from main product
-          const { _id, __v, createdAt, ...cleanProduct } = product;
+          // Keep _id but remove other MongoDB specific fields
+          const { __v, createdAt, ...cleanProduct } = product;
 
           // Clean up alternate medicines
           const cleanedAlternates = product.alternateMedicines?.map(alt => {
-            const { _id, __v, createdAt, ...cleanAlt } = alt;
+            const { __v, createdAt, ...cleanAlt } = alt;
             return cleanAlt;
           }) || [];
 
           return {
             ...cleanProduct,
-            id: _id,
+            _id: product._id, // Ensure _id is preserved
             alternateMedicines: cleanedAlternates,
             // Ensure these fields have values
             ConditionTreated: product.ConditionTreated || "",
@@ -123,6 +124,7 @@ const AdminDashboard = () => {
           };
         });
 
+        console.log("Cleaned Products:", cleanedProducts);
         setProducts(Array.isArray(cleanedProducts) ? cleanedProducts : []);
         setLoadingProducts(false);
       } catch (error) {
@@ -344,38 +346,34 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleGSTChange = async (value) => {
+  const handleDeliveryChargeChange = async (newCharge) => {
     try {
-      const gstPercentage = parseFloat(value) || 0;
-      
-      // Update the local state immediately for better UX
-      setSelectedOrderDetails(prev => ({
-        ...prev,
-        gstPercentage,
-        totalAmountWithGST: (prev.totalAmount || 0) * (1 + gstPercentage / 100)
-      }));
+      if (!selectedOrderDetails) return;
 
-      // Update the order with new GST percentage
+      const updatedOrder = {
+        ...selectedOrderDetails,
+        deliveryCharge: parseFloat(newCharge) || 0,
+        totalAmountWithDelivery: selectedOrderDetails.totalAmount + (parseFloat(newCharge) || 0)
+      };
+
+      setSelectedOrderDetails(updatedOrder);
+
       const response = await axios.put(
-        `${import.meta.env.VITE_BACKEND_URL}/api/orders/admin/orders/${selectedOrderDetails._id}/gst`,
-        { gstPercentage },
+        `${import.meta.env.VITE_BACKEND_URL}/api/orders/admin/orders/${selectedOrderDetails._id}/delivery-charge`,
+        { deliveryCharge: parseFloat(newCharge) || 0 },
         {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
+          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
         }
       );
 
-      // Update with server response
-      setSelectedOrderDetails(response.data);
-      toast.success("GST percentage updated successfully!", {
-        position: "top-center",
-      });
+      setOrders(orders.map(order => 
+        order._id === selectedOrderDetails._id ? response.data : order
+      ));
+
+      toast.success("Delivery charge updated successfully");
     } catch (error) {
-      console.error("Error updating GST:", error);
-      toast.error(error.response?.data?.message || "Failed to update GST", {
-        position: "top-center",
-      });
+      console.error("Error updating delivery charge:", error);
+      toast.error("Failed to update delivery charge");
     }
   };
 
@@ -533,8 +531,21 @@ const AdminDashboard = () => {
 
   const handleAddItem = async () => {
     try {
+      if (!newItem.productId) {
+        toast.error("Please select a product", {
+          position: "top-center",
+        });
+        return;
+      }
+
+      console.log("New Item:", newItem);
+      console.log("All Products:", products);
+
       // Parse the product ID and check if it's an alternate medicine
       const [productId, isAlt, altIndex] = newItem.productId.split('|');
+      console.log("Parsed Product ID:", productId);
+      console.log("Is Alternate:", isAlt);
+      console.log("Alt Index:", altIndex);
       
       // Find the base product
       const selectedProduct = products.find(p => p._id === productId);
@@ -548,43 +559,26 @@ const AdminDashboard = () => {
       }
 
       // If it's an alternate medicine, use the alternate medicine details
-      const finalProduct = isAlt === 'alt' 
+      const finalProduct = isAlt === 'alt' && selectedProduct.alternateMedicines?.[parseInt(altIndex)]
         ? {
-            ...selectedProduct,
-            drugName: selectedProduct.alternateMedicines[altIndex].name,
-            price: selectedProduct.alternateMedicines[altIndex].price
+            ...selectedProduct.alternateMedicines[parseInt(altIndex)],
+            _id: selectedProduct._id, // Use the base product ID
+            isAlternate: true,
+            baseProductId: selectedProduct._id,
+            alternateIndex: parseInt(altIndex) // Add the alternate index
           }
         : selectedProduct;
 
-      // Create the item object with all required fields
-      const itemToAdd = {
-        productId: finalProduct._id,
-        quantity: newItem.quantity,
-        price: finalProduct.price,
-        productDetails: {
-          name: finalProduct.drugName,
-          drugName: finalProduct.drugName,
-          price: finalProduct.price,
-          margin: finalProduct.margin || 0,
-          imageUrl: finalProduct.imageUrl || "",
-          mrp: finalProduct.mrp || 0,
-          salt: finalProduct.salt || "",
-          category: finalProduct.category || "",
-          manufacturer: finalProduct.manufacturer || "",
-          size: finalProduct.size || ""
-        }
-      };
-
-      // Log the complete request details
-      console.log("Request URL:", `${import.meta.env.VITE_BACKEND_URL}/api/orders/admin/orders/${selectedOrderDetails._id}/items`);
-      console.log("Request Headers:", {
-        Authorization: `Bearer ${localStorage.getItem("token")}`
-      });
-      console.log("Request Body:", JSON.stringify(itemToAdd, null, 2));
-
       const response = await axios.post(
         `${import.meta.env.VITE_BACKEND_URL}/api/orders/admin/orders/${selectedOrderDetails._id}/items`,
-        itemToAdd,
+        {
+          productId: selectedProduct._id, // Always send the base product ID
+          quantity: parseInt(newItem.quantity),
+          price: parseFloat(finalProduct.price),
+          gstPercentage: parseFloat(newItem.gstPercentage || 0),
+          isAlternate: !!isAlt,
+          alternateIndex: isAlt ? parseInt(altIndex) : undefined // Send the alternate index instead
+        },
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
@@ -592,112 +586,38 @@ const AdminDashboard = () => {
         }
       );
 
-      console.log("Server Response:", response.data);
-
-      // Update the local state with the complete order details
+      // Update the order details with the new item
       setSelectedOrderDetails(response.data);
       setShowAddItemModal(false);
-      setNewItem({ productId: "", quantity: 1 });
+      
+      // Reset the form
+      setNewItem({
+        productId: "",
+        quantity: 1,
+        gstPercentage: 0
+      });
+
       toast.success("Item added successfully!", {
         position: "top-center",
       });
     } catch (error) {
       console.error("Error adding item:", error);
-      console.error("Error config:", error.config);
-      console.error("Error request:", error.request);
-      console.error("Error response:", error.response?.data);
-      console.error("Error status:", error.response?.status);
-      console.error("Error headers:", error.response?.headers);
-      
-      // Log the complete error object
-      console.error("Complete error object:", JSON.stringify(error, null, 2));
-      
       toast.error(error.response?.data?.message || "Failed to add item", {
         position: "top-center",
       });
     }
   };
 
-  // Add this new function to handle GST adjustments
-  const handleGSTAdjustment = async (item, adjustment) => {
-    try {
-      const newGSTPercentage = Math.max(0, (item.gstPercentage || 0) + adjustment);
-      
-      const response = await axios.put(
-        `${import.meta.env.VITE_BACKEND_URL}/api/orders/admin/orders/${selectedOrderDetails._id}/items/${item._id}`,
-        { 
-          quantity: item.quantity,
-          price: item.price,
-          gstPercentage: newGSTPercentage
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
-
-      setSelectedOrderDetails(response.data);
-      toast.success("GST updated successfully!", {
-        position: "top-center",
-      });
-    } catch (error) {
-      console.error("Error updating GST:", error);
-      toast.error(error.response?.data?.message || "Failed to update GST", {
-        position: "top-center",
-      });
-    }
-  };
-
-  // Add this new function to handle direct GST percentage updates
-  const handleGSTPercentageChange = async (item, newGSTPercentage) => {
-    try {
-      // Ensure newGSTPercentage is a valid number and between 0 and 100
-      newGSTPercentage = Math.min(100, Math.max(0, parseFloat(newGSTPercentage) || 0));
-      
-      const response = await axios.put(
-        `${import.meta.env.VITE_BACKEND_URL}/api/orders/admin/orders/${selectedOrderDetails._id}/items/${item._id}`,
-        { 
-          quantity: item.quantity,
-          price: item.price,
-          gstPercentage: newGSTPercentage
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
-
-      setSelectedOrderDetails(response.data);
-      toast.success("GST percentage updated successfully!", {
-        position: "top-center",
-      });
-    } catch (error) {
-      console.error("Error updating GST percentage:", error);
-      toast.error(error.response?.data?.message || "Failed to update GST percentage", {
-        position: "top-center",
-      });
-    }
-  };
-
-  // Add this function to handle discount percentage updates
+  // Add function to handle discount percentage updates
   const handleDiscountChange = async (newDiscountPercentage) => {
     try {
       // Ensure newDiscountPercentage is a valid number and between 0 and 100
       newDiscountPercentage = Math.min(100, Math.max(0, parseFloat(newDiscountPercentage) || 0));
-      setDiscountPercentage(newDiscountPercentage);
       
       // Calculate the new total with discount
       const subtotal = selectedOrderDetails.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-      const gstAmount = selectedOrderDetails.items.reduce((sum, item) => {
-        const itemSubtotal = item.price * item.quantity;
-        return sum + (itemSubtotal * (item.gstPercentage || 0) / 100);
-      }, 0);
-      
-      const totalBeforeDiscount = subtotal + gstAmount;
-      const discountAmount = (totalBeforeDiscount * newDiscountPercentage) / 100;
-      const finalTotal = totalBeforeDiscount - discountAmount;
+      const discountAmount = (subtotal * newDiscountPercentage) / 100;
+      const finalTotal = subtotal - discountAmount + (selectedOrderDetails.deliveryCharge || 0);
       
       // Update the order with the new discount and final total
       const response = await axios.put(
@@ -723,6 +643,34 @@ const AdminDashboard = () => {
       toast.error(error.response?.data?.message || "Failed to update discount", {
         position: "top-center",
       });
+    }
+  };
+
+  // Add function to handle GST percentage updates
+  const handleGSTPercentageChange = async (item, newGSTPercentage) => {
+    try {
+      // Ensure newGSTPercentage is a valid number and between 0 and 100
+      newGSTPercentage = Math.min(100, Math.max(0, parseFloat(newGSTPercentage) || 0));
+      
+      const response = await axios.put(
+        `${import.meta.env.VITE_BACKEND_URL}/api/orders/admin/orders/${selectedOrderDetails._id}/items/${item._id}`,
+        { 
+          quantity: item.quantity,
+          price: item.price,
+          gstPercentage: newGSTPercentage
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        }
+      );
+
+      setSelectedOrderDetails(response.data);
+      toast.success("GST percentage updated successfully!");
+    } catch (error) {
+      console.error("Error updating GST percentage:", error);
+      toast.error("Failed to update GST percentage");
     }
   };
 
@@ -1254,7 +1202,7 @@ const AdminDashboard = () => {
                             <th className="py-2 px-4 border-b text-right">Price</th>
                             <th className="py-2 px-4 border-b text-center">GST %</th>
                             <th className="py-2 px-4 border-b text-right">GST Amount</th>
-                            <th className="py-2 px-4 border-b text-right">Total</th>
+                            <th className="py-2 px-4 border-b text-right">Item Total</th>
                             <th className="py-2 px-4 border-b text-center">Actions</th>
                           </tr>
                         </thead>
@@ -1262,7 +1210,7 @@ const AdminDashboard = () => {
                           {selectedOrderDetails.items.map((item, index) => {
                             const subtotal = item.price * item.quantity;
                             const gstAmount = subtotal * (item.gstPercentage || 0) / 100;
-                            const total = subtotal + gstAmount;
+                            const itemTotal = subtotal + gstAmount;
                             
                             return (
                               <tr key={index} className="hover:bg-gray-50">
@@ -1311,7 +1259,7 @@ const AdminDashboard = () => {
                                   ₹{gstAmount.toFixed(2)}
                                 </td>
                                 <td className="py-2 px-4 border-b text-right">
-                                  ₹{total.toFixed(2)}
+                                  ₹{itemTotal.toFixed(2)}
                                 </td>
                                 <td className="py-2 px-4 border-b text-center">
                                   <div className="flex justify-center gap-2">
@@ -1331,28 +1279,20 @@ const AdminDashboard = () => {
                           })}
                           {/* Summary rows */}
                           <tr>
-                            <td colSpan="7" className="py-2 px-4 border-b text-right font-medium">
+                            <td colSpan="5" className="py-2 px-4 border-b text-right font-medium">
                               Subtotal
-                            </td>
-                            <td className="py-2 px-4 border-b text-right font-medium">
-                              ₹{selectedOrderDetails.items.reduce((sum, item) => sum + (item.price * item.quantity), 0).toFixed(2)}
-                            </td>
-                            <td className="py-2 px-4 border-b"></td>
-                          </tr>
-                          <tr>
-                            <td colSpan="7" className="py-2 px-4 border-b text-right font-medium">
-                              Total GST
                             </td>
                             <td className="py-2 px-4 border-b text-right font-medium">
                               ₹{selectedOrderDetails.items.reduce((sum, item) => {
                                 const subtotal = item.price * item.quantity;
-                                return sum + (subtotal * (item.gstPercentage || 0) / 100);
+                                const gstAmount = subtotal * (item.gstPercentage || 0) / 100;
+                                return sum + subtotal + gstAmount;
                               }, 0).toFixed(2)}
                             </td>
                             <td className="py-2 px-4 border-b"></td>
                           </tr>
                           <tr>
-                            <td colSpan="7" className="py-2 px-4 border-b text-right font-medium">
+                            <td colSpan="5" className="py-2 px-4 border-b text-right font-medium">
                               Discount
                             </td>
                             <td className="py-2 px-4 border-b text-right font-medium">
@@ -1362,37 +1302,46 @@ const AdminDashboard = () => {
                                   min="0"
                                   max="100"
                                   value={selectedOrderDetails.discountPercentage || 0}
-                                  onChange={(e) => {
-                                    e.stopPropagation();
-                                    handleDiscountChange(e.target.value);
-                                  }}
+                                  onChange={(e) => handleDiscountChange(e.target.value)}
                                   className="w-16 px-2 py-1 text-center border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                                 <span className="ml-1">%</span>
                                 <span className="ml-2">
-                                  (₹{((selectedOrderDetails.items.reduce((sum, item) => {
-                                    const subtotal = item.price * item.quantity;
-                                    const gstAmount = subtotal * (item.gstPercentage || 0) / 100;
-                                    return sum + subtotal + gstAmount;
-                                  }, 0) * (selectedOrderDetails.discountPercentage || 0)) / 100).toFixed(2)})
+                                  (₹{selectedOrderDetails.discountAmount?.toFixed(2)})
                                 </span>
                               </div>
                             </td>
                             <td className="py-2 px-4 border-b"></td>
                           </tr>
                           <tr>
-                            <td colSpan="7" className="py-2 px-4 border-b text-right font-bold">
-                              Total Amount (Including GST & Discount)
+                            <td colSpan="5" className="py-2 px-4 border-b text-right font-medium">
+                              Delivery Charge
+                            </td>
+                            <td className="py-2 px-4 border-b text-right font-medium">
+                              <div className="flex items-center justify-end">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={selectedOrderDetails.deliveryCharge || 0}
+                                  onChange={(e) => handleDeliveryChargeChange(e.target.value)}
+                                  className="w-16 px-2 py-1 text-center border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <span className="ml-1">₹</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-4 border-b"></td>
+                          </tr>
+                          <tr>
+                            <td colSpan="5" className="py-2 px-4 border-b text-right font-bold">
+                              Final Total
                             </td>
                             <td className="py-2 px-4 border-b text-right font-bold">
-                              ₹{selectedOrderDetails.finalTotal ? selectedOrderDetails.finalTotal.toFixed(2) : 
-                                (selectedOrderDetails.items.reduce((sum, item) => {
-                                  const subtotal = item.price * item.quantity;
-                                  const gstAmount = subtotal * (item.gstPercentage || 0) / 100;
-                                  const totalBeforeDiscount = sum + subtotal + gstAmount;
-                                  const discountAmount = (totalBeforeDiscount * (selectedOrderDetails.discountPercentage || 0)) / 100;
-                                  return totalBeforeDiscount - discountAmount;
-                                }, 0)).toFixed(2)}
+                              ₹{(selectedOrderDetails.items.reduce((sum, item) => {
+                                const subtotal = item.price * item.quantity;
+                                const gstAmount = subtotal * (item.gstPercentage || 0) / 100;
+                                return sum + subtotal + gstAmount;
+                              }, 0) - (selectedOrderDetails.discountAmount || 0) + (selectedOrderDetails.deliveryCharge || 0)).toFixed(2)}
                             </td>
                             <td className="py-2 px-4 border-b"></td>
                           </tr>
@@ -1595,6 +1544,19 @@ const AdminDashboard = () => {
                 value={newItem.quantity}
                 onChange={(e) =>
                   setNewItem({ ...newItem, quantity: parseInt(e.target.value) })
+                }
+                className="w-full border rounded px-3 py-2"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block mb-2">GST Percentage</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={newItem.gstPercentage}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, gstPercentage: parseFloat(e.target.value) })
                 }
                 className="w-full border rounded px-3 py-2"
               />
