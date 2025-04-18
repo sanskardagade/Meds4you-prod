@@ -6,8 +6,9 @@ const cartSchema = new Schema({
         {
             productId: { type: Schema.Types.ObjectId, ref: 'Product', required: true }, // Changed from medicineId to productId
             quantity: { type: Number, default: 1 },
+            selection: { type: String, enum: ['original', 'recommended'], default: 'original' }, // Added selection field
         },
     ],
 }, { timestamps: true });
 
-export default model("Cart", cartSchema);
+export default model("Cart", cartSchema); 

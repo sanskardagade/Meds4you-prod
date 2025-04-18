@@ -22,6 +22,37 @@ const CheckoutPage = () => {
   const selectedProducts = location.state?.selectedProducts || [];
   // console.log(selectedProducts);
   const totalAmount = location.state?.total || "0.00";
+  
+  // Load saved selections from localStorage if available
+  useEffect(() => {
+    if (selectedProducts.length > 0) {
+      const savedSelections = localStorage.getItem('medicineSelections');
+      if (savedSelections) {
+        const parsedSelections = JSON.parse(savedSelections);
+        
+        // Update product selections with saved preferences 
+        const updatedProducts = selectedProducts.map(product => {
+          const productId = product.productId._id;
+          const savedSelection = parsedSelections[productId];
+          
+          if (savedSelection) {
+            return {
+              ...product,
+              selection: savedSelection,
+              isRecommended: savedSelection === "recommended"
+            };
+          }
+          return product;
+        });
+        
+        // Update the state with the saved selections
+        location.state = {
+          ...location.state,
+          selectedProducts: updatedProducts
+        };
+      }
+    }
+  }, [selectedProducts]);
 
   const handlePrescriptionUpload = async (file) => {
     if (!file) {

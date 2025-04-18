@@ -5,13 +5,13 @@ import dotenv from 'dotenv';
 import {authorizeRoles} from '../middlewares/authMiddleware.js';
 
 dotenv.config();  // Load environment variables from .env file
-
+ 
 const router = express.Router();
 
 
 router.post('/add', authorizeRoles('user'), async (req, res) => {
     try {
-const { productId, quantity } = req.body;
+const { productId, quantity, selection } = req.body;
     const userId = req.user.id;
 
     if (!productId || !userId) {
@@ -27,7 +27,7 @@ const { productId, quantity } = req.body;
 // Create new cart if it doesn't exist
       cart = new Cart({
 userId,
-items: [{ productId, quantity: quantity || 1 }]
+items: [{ productId, quantity: quantity || 1, selection: selection || 'original' }]
 });
     } else {
 // Update existing cart
@@ -38,9 +38,12 @@ item => item.productId.toString() === productId
       if (itemIndex > -1) {
 // Update quantity if item exists
         cart.items[itemIndex].quantity += quantity || 1;
+        if (selection) {
+          cart.items[itemIndex].selection = selection;
+        }
       } else {
 // Add new item
-        cart.items.push({ productId, quantity: quantity || 1 });
+        cart.items.push({ productId, quantity: quantity || 1, selection: selection || 'original' });
       }
     }
 
@@ -120,6 +123,30 @@ router.put('/update', authorizeRoles('user'), async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update cart' });
+  }
+});
+
+router.put('/update-selection', authorizeRoles('user'), async (req, res) => {
+  const { productId, selection } = req.body;
+
+  try {
+    const userId = req.user.id;
+    let cart = await Cart.findOne({ userId });
+    if (cart) {
+      const itemIndex = cart.items.findIndex(item => item.productId.toString() === productId);
+      if (itemIndex > -1) {
+        cart.items[itemIndex].selection = selection;
+        await cart.save();
+        res.status(200).json(cart);
+      } else {
+        res.status(404).json({ error: 'Product not found in cart' });
+      }
+    } else {
+      res.status(404).json({ error: 'Cart not found' });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update selection' });
   }
 });
 

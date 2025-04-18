@@ -619,7 +619,7 @@ const AdminDashboard = () => {
       const discountAmount = (subtotal * newDiscountPercentage) / 100;
       const finalTotal = subtotal - discountAmount + (selectedOrderDetails.deliveryCharge || 0);
       
-      // Update the order with the new discount and final total
+      // Update the order with the new discount and final total 
       const response = await axios.put(
         `${import.meta.env.VITE_BACKEND_URL}/api/orders/admin/orders/${selectedOrderDetails._id}/discount`,
         { 

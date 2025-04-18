@@ -9,7 +9,7 @@ const ensureValidNumber = (value) => {
 // Helper function to format currency
 const formatCurrency = (amount) => {
   const validAmount = ensureValidNumber(amount);
-  return `₹${validAmount.toFixed(2)}`;
+  return `${validAmount.toFixed(2)}`;
 };
 
 export const generateInvoice = async (order) => {
@@ -83,8 +83,10 @@ export const generateInvoice = async (order) => {
       // Table headers
       doc.text('#', margin + 5, yPos + 8);
       doc.text('Product', margin + 20, yPos + 8);
-      doc.text('Qty', pageWidth - margin - 60, yPos + 8, { align: 'right' });
-      doc.text('Price', pageWidth - margin - 40, yPos + 8, { align: 'right' });
+      doc.text('Qty', pageWidth - margin - 100, yPos + 8, { align: 'right' });
+      doc.text('Price', pageWidth - margin - 80, yPos + 8, { align: 'right' });
+      doc.text('GST %', pageWidth - margin - 60, yPos + 8, { align: 'right' });
+      doc.text('GST Amt', pageWidth - margin - 40, yPos + 8, { align: 'right' });
       doc.text('Total', pageWidth - margin - 15, yPos + 8, { align: 'right' });
 
       // Order items
@@ -99,51 +101,58 @@ export const generateInvoice = async (order) => {
           yPos = 20;
         }
 
+        const itemPrice = ensureValidNumber(item.price);
+        const itemQuantity = ensureValidNumber(item.quantity);
+        const itemSubtotal = itemPrice * itemQuantity;
+        const gstAmount = itemSubtotal * (item.gstPercentage || 0) / 100;
+        const itemTotal = itemSubtotal + gstAmount;
+
         // Item row
         doc.text(`${index + 1}`, margin + 5, yPos);
         doc.text(item.productDetails?.drugName || 'Unknown Product', margin + 20, yPos);
-        doc.text(item.quantity.toString(), pageWidth - margin - 60, yPos, { align: 'right' });
-        doc.text(`₹${ensureValidNumber(item.price).toFixed(2)}`, pageWidth - margin - 40, yPos, { align: 'right' });
-        doc.text(`₹${(ensureValidNumber(item.price) * ensureValidNumber(item.quantity)).toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
+        doc.text(item.quantity.toString(), pageWidth - margin - 100, yPos, { align: 'right' });
+        doc.text(`${itemPrice.toFixed(2)}`, pageWidth - margin - 80, yPos, { align: 'right' });
+        doc.text(`${item.gstPercentage || 0}%`, pageWidth - margin - 60, yPos, { align: 'right' });
+        doc.text(`${gstAmount.toFixed(2)}`, pageWidth - margin - 40, yPos, { align: 'right' });
+        doc.text(`${itemTotal.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
         
         yPos += 10;
       });
 
-      // Totals
+      // Calculate totals
+      const subtotal = order.items.reduce((sum, item) => {
+        const itemPrice = ensureValidNumber(item.price);
+        const itemQuantity = ensureValidNumber(item.quantity);
+        const itemSubtotal = itemPrice * itemQuantity;
+        const gstAmount = itemSubtotal * (item.gstPercentage || 0) / 100;
+        return sum + itemSubtotal + gstAmount;
+      }, 0);
+
+      const discountAmount = (subtotal * (order.discountPercentage || 0)) / 100;
+      const deliveryCharge = ensureValidNumber(order.deliveryCharge || 0);
+      const finalTotal = subtotal - discountAmount + deliveryCharge;
+      
+      // Subtotal (including GST)
       yPos += 10;
       doc.setFont('helvetica', 'bold');
-      
-      // Subtotal
-      doc.text('Subtotal:', pageWidth - margin - 60, yPos, { align: 'right' });
-      const subtotal = order.items.reduce((sum, item) => {
-        return sum + (ensureValidNumber(item.price) * ensureValidNumber(item.quantity));
-      }, 0);
-      doc.text(`₹${subtotal.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
-      
-      // Delivery Charge
-      yPos += 10;
-      doc.text('Delivery Charge:', pageWidth - margin - 60, yPos, { align: 'right' });
-      const deliveryCharge = ensureValidNumber(order.deliveryCharge || 0);
-      doc.text(`₹${deliveryCharge.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
-      
-      // Total before discount
-      yPos += 10;
-      doc.text('Total:', pageWidth - margin - 60, yPos, { align: 'right' });
-      const totalBeforeDiscount = subtotal + deliveryCharge;
-      doc.text(`₹${totalBeforeDiscount.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
+      doc.text('Subtotal (including GST):', pageWidth - margin - 80, yPos, { align: 'right' });
+      doc.text(`${subtotal.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
       
       // Discount
       yPos += 10;
-      doc.text(`Discount (${order.discountPercentage || 0}%):`, pageWidth - margin - 60, yPos, { align: 'right' });
-      const discountAmount = (totalBeforeDiscount * (order.discountPercentage || 0)) / 100;
-      doc.text(`₹${discountAmount.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
+      doc.text(`Discount (${order.discountPercentage || 0}%):`, pageWidth - margin - 80, yPos, { align: 'right' });
+      doc.text(`${discountAmount.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
+      
+      // Delivery Charge
+      yPos += 10;
+      doc.text('Delivery Charge:', pageWidth - margin - 80, yPos, { align: 'right' });
+      doc.text(`${deliveryCharge.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
       
       // Final Total
       yPos += 10;
       doc.setFontSize(12);
-      doc.text('Final Total:', pageWidth - margin - 60, yPos, { align: 'right' });
-      const finalTotal = totalBeforeDiscount - discountAmount;
-      doc.text(`₹${finalTotal.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
+      doc.text('Final Total:', pageWidth - margin - 80, yPos, { align: 'right' });
+      doc.text(`${finalTotal.toFixed(2)}`, pageWidth - margin - 15, yPos, { align: 'right' });
 
       // Terms and conditions
       yPos += 30;
@@ -167,4 +176,4 @@ export const generateInvoice = async (order) => {
       reject(error);
     }
   });
-};  
+};     

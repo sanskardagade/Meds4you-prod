@@ -9,10 +9,19 @@ const CartPage = () => {
   const [cart, setCart] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectedMedicines, setSelectedMedicines] = useState({});
+  const [selectedMedicines, setSelectedMedicines] = useState(() => {
+    // Initialize from localStorage if available
+    const savedSelections = localStorage.getItem('medicineSelections');
+    return savedSelections ? JSON.parse(savedSelections) : {};
+  });
   const navigate = useNavigate();
-  const dispatch = useDispatch();
+  const dispatch = useDispatch(); 
   const token = useSelector((state) => state.auth.token);
+
+  // Save selections to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('medicineSelections', JSON.stringify(selectedMedicines));
+  }, [selectedMedicines]);
 
   useEffect(() => {
     if (token) {
@@ -85,24 +94,52 @@ const CartPage = () => {
   const handleSelectionChange = (productId, isRecommended) => {
     setSelectedMedicines((prev) => {
       const currentSelection = prev[productId];
+      let newSelection;
 
       // Toggle selection: if already selected, uncheck it
       if (currentSelection === (isRecommended ? "recommended" : "original")) {
-        return { ...prev, [productId]: null }; // Unselect
+        newSelection = { ...prev, [productId]: null }; // Unselect
+      } else {
+        newSelection = {
+          ...prev,
+          [productId]: isRecommended ? "recommended" : "original",
+        };
       }
 
-      return {
-        ...prev,
-        [productId]: isRecommended ? "recommended" : "original",
-      };
-    });
-  };
-  const updateMedicineSelection = (productId, isRecommended) => {
-    setSelectedMedicines((prev) => {
-      return {
-        ...prev,
-        [productId]: isRecommended ? "recommended" : "original",
-      };
+      // Save to localStorage immediately
+      localStorage.setItem('medicineSelections', JSON.stringify(newSelection));
+      
+      // Update selection in the backend
+      if (token) {
+        const selection = isRecommended ? "recommended" : "original";
+        axios
+          .put(
+            `${import.meta.env.VITE_BACKEND_URL}/api/cart/update-selection`,
+            { productId, selection },
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          )
+          .then(() => {
+            // Update cart state with new selection
+            setCart((prevCart) =>
+              prevCart.map((item) =>
+                item.productId._id === productId
+                  ? { ...item, selection }
+                  : item
+              )
+            );
+          })
+          .catch((err) => {
+            console.error("Failed to update selection:", err);
+            // Revert the selection in case of error
+            setSelectedMedicines(prev);
+          });
+      }
+      
+      return newSelection;
     });
   };
 
@@ -381,7 +418,7 @@ const CartPage = () => {
             className="bg-green-500 text-white text-xs px-3 py-2 rounded-md flex-1 mr-2"
             onClick={() => {
               cart.forEach((item) =>
-                updateMedicineSelection(item.productId._id, true)
+                handleSelectionChange(item.productId._id, true)
               );
             }}
           >
@@ -392,7 +429,7 @@ const CartPage = () => {
             className="bg-red-400 text-white text-xs px-3 py-2 rounded-md flex-1 ml-2"
             onClick={() => {
               cart.forEach((item) =>
-                updateMedicineSelection(item.productId._id, false)
+                handleSelectionChange(item.productId._id, false)
               );
             }}
           >
@@ -452,7 +489,7 @@ const CartPage = () => {
                           className="m-4 bg-green-400 text-white px-3 py-1 rounded-md"
                           onClick={() => {
                             cart.forEach((item) =>
-                              updateMedicineSelection(item.productId._id, true)
+                              handleSelectionChange(item.productId._id, true)
                             );
                           }}
                         >
@@ -469,7 +506,7 @@ const CartPage = () => {
                           className="m-4 bg-red-400 text-white px-3 py-1 rounded-md"
                           onClick={() => {
                             cart.forEach((item) =>
-                              updateMedicineSelection(item.productId._id, false)
+                              handleSelectionChange(item.productId._id, false)
                             );
                           }}
                         >
